@@ -14,16 +14,16 @@ DATE DE INITIALIZARE (PROGRAMA):
 3. Expresii Fixe (NVV): in Erfüllung gehen, Rücksicht nehmen, einen Entschluss fassen.
 `;
 
-const BASE_SYSTEM_INSTRUCTION = `Ești Herr Müller, profesor de germană.
+const BASE_SYSTEM_INSTRUCTION = `Ești Herr Müller, profesor de germană academic.
 
 ### PROTOCOLUL DE IDENTIFICARE (OBLIGATORIU) ###
 1. **Salutul**: "Guten Tag! Ich bin Herr Müller, Ihr Deutschlehrer."
-2. **Identificarea**: Cere imediat numele studentului: "Îmi puteți spune numele dumneavoastră pentru a vă înregistra în sistem?"
-3. **Blocaj**: NU discuta despre cursuri, NU preda și NU face glume până nu primești numele. Dacă studentul evită, insistă politicos: "Vă rog, numele dumneavoastră este esențial pentru dosarul academic."
-4. **Confirmarea**: Odată ce ai numele (ex: Cristian), confirmă-l EXACT folosind această formulă: "V-am înregistrat, [Nume]. Acum putem începe. Ce doriți să studiem?"
+2. **Identificarea**: Cere imediat numele studentului.
+3. **Blocaj**: NU preda nimic până nu primești numele. 
+4. **Confirmarea (IMPORTANT)**: Când primești numele (ex: Cristian), trebuie să răspunzi EXACT: "V-am înregistrat, [Nume]. Acum putem începe. Ce doriți să studiem?" (Folosește exact cuvântul "înregistrat" urmat de nume).
 
 ### REGULI DE LOGARE ###
-Toate mesajele vor fi salvate intern în formatul: [AN-LUNA-ZI ORA:MINUT:SECUNDĂ] [NUME] Rol: Mesaj.
+Fiecare mesaj va fi logat în formatul: [AAAA-LL-ZZ HH:mm:ss] [Nume] Rol: Mesaj.
 
 ${CURRICULUM_DATA}`;
 
@@ -36,6 +36,8 @@ const App: React.FC = () => {
   const [transcription, setTranscription] = useState<TranscriptionPart[]>([]);
   const [studentName, setStudentName] = useState<string>("Necunoscut");
   
+  // Ref-uri pentru stabilitate în callback-uri
+  const studentNameRef = useRef<string>("Necunoscut");
   const audioContextInRef = useRef<AudioContext | null>(null);
   const audioContextOutRef = useRef<AudioContext | null>(null);
   const nextStartTimeRef = useRef(0);
@@ -50,7 +52,7 @@ const App: React.FC = () => {
   const getTimestamp = () => {
     const now = new Date();
     const date = now.toISOString().split('T')[0];
-    const time = now.toLocaleTimeString('ro-RO', { hour12: false }); // HH:mm:ss
+    const time = now.toLocaleTimeString('ro-RO', { hour12: false }); 
     return `[${date} ${time}]`;
   };
 
@@ -84,14 +86,12 @@ const App: React.FC = () => {
     }
   };
 
-  // Salvare automată la interval
   useEffect(() => {
-    const timer = setInterval(triggerSave, 20000);
+    const timer = setInterval(triggerSave, 30000);
     return () => clearInterval(timer);
   }, []);
 
   const disconnect = useCallback(async () => {
-    // Salvare imediată la apăsarea butonului de stop
     await triggerSave();
 
     if (sessionRef.current) {
@@ -112,6 +112,9 @@ const App: React.FC = () => {
     setIsListening(false);
     setIsSpeaking(false);
     setStudentName("Necunoscut");
+    studentNameRef.current = "Necunoscut";
+    fullConversationTextRef.current = "";
+    setTranscription([]);
   }, []);
 
   const connect = async () => {
@@ -158,15 +161,21 @@ const App: React.FC = () => {
               const m = transcriptionBufferRef.current.model.trim();
               const ts = getTimestamp();
 
-              let currentName = studentName;
-              // Detectăm dacă profesorul Müller a confirmat înregistrarea numelui
-              if (currentName === "Necunoscut" && m.toLowerCase().includes("v-am înregistrat")) {
+              // Detecție nume și "patching" retroactiv
+              if (studentNameRef.current === "Necunoscut" && m.toLowerCase().includes("înregistrat")) {
                  const match = m.match(/înregistrat,?\s*([^.!?\s]+)/i);
                  if (match) {
-                    currentName = match[1].replace(/[,.;]$/, "").trim();
-                    setStudentName(currentName);
+                    const detected = match[1].replace(/[,.;]$/, "").trim();
+                    studentNameRef.current = detected;
+                    setStudentName(detected);
+                    
+                    // Corectăm retroactiv toate intrările anterioare din sesiune care au rămas cu "Necunoscut"
+                    // Fix: replaced .replaceAll() with .replace() using a global regex for compatibility with older ES targets
+                    fullConversationTextRef.current = fullConversationTextRef.current.replace(/\[Necunoscut\]/g, `[${detected}]`);
                  }
               }
+
+              const currentName = studentNameRef.current;
 
               if (u) {
                 fullConversationTextRef.current += `${ts} [${currentName}] Student: ${u}\n`;
@@ -221,7 +230,7 @@ const App: React.FC = () => {
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></span>
               <p className="text-slate-500 font-semibold uppercase text-[10px] tracking-widest">
-                {status === ConnectionStatus.CONNECTED ? `Student: ${studentName}` : 'Sesiune de curs'}
+                {status === ConnectionStatus.CONNECTED ? `Identificat: ${studentName}` : 'Academia Academică'}
               </p>
             </div>
           </div>
@@ -230,7 +239,7 @@ const App: React.FC = () => {
         {status === ConnectionStatus.CONNECTED && (
           <button 
             onClick={disconnect}
-            className="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white px-8 py-3 rounded-2xl font-bold transition-all border border-red-100 academic-shadow flex items-center gap-3"
+            className="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white px-8 py-3 rounded-2xl font-bold transition-all border border-red-100 academic-shadow flex items-center gap-3 active:scale-95"
           >
             <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
             Stop & Salvează
@@ -242,12 +251,12 @@ const App: React.FC = () => {
         {status === ConnectionStatus.IDLE || status === ConnectionStatus.ERROR ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-6 animate-in fade-in duration-1000">
             <div className="mb-6 p-4 bg-blue-50 rounded-full inline-block">
-              <span className="text-blue-700 font-bold text-lg px-6 py-2 italic uppercase tracking-wider">Înregistrare Academică Obligatorie</span>
+              <span className="text-blue-700 font-bold text-lg px-6 py-2 italic uppercase tracking-wider">Identificare & Jurnal Academic</span>
             </div>
             <h2 className="text-5xl md:text-7xl font-bold text-slate-900 mb-6 tracking-tight leading-tight">
-              Sunteți gata pentru <br/><span className="text-blue-700">o nouă lecție?</span>
+              Să începem <br/><span className="text-blue-700">sesiunea de astăzi.</span>
             </h2>
-            <p className="text-xl text-slate-500 mb-10 max-w-2xl font-medium">Fiecare sesiune este salvată cu timestamp precis și numele dumneavoastră în jurnalul academiei.</p>
+            <p className="text-xl text-slate-500 mb-10 max-w-2xl font-medium">Jurnalul va înregistra automat data, ora și numele dumneavoastră la fiecare mesaj.</p>
             
             <button 
               onClick={connect}
@@ -255,7 +264,7 @@ const App: React.FC = () => {
               className={`group relative overflow-hidden px-20 py-8 rounded-3xl transition-all academic-shadow active:scale-95 ${isLoadingMemories ? 'bg-slate-200' : 'bg-blue-700 hover:bg-blue-800 shadow-blue-200 shadow-2xl'}`}
             >
               <span className="relative z-10 text-2xl font-bold text-white uppercase tracking-wide">
-                {isLoadingMemories ? 'Încărcăm Istoricul...' : 'Începe Lecția'}
+                {isLoadingMemories ? 'Pregătim Arhiva...' : 'Intră în Lecție'}
               </span>
             </button>
           </div>
@@ -266,7 +275,9 @@ const App: React.FC = () => {
             <div className="flex justify-center pb-6">
               <div className="bg-white px-10 py-5 rounded-full flex items-center gap-4 academic-shadow border border-slate-100">
                 <div className="w-3 h-3 bg-blue-600 rounded-full animate-ping"></div>
-                <span className="text-slate-600 font-bold text-lg italic tracking-tight">Herr Müller ascultă...</span>
+                <span className="text-slate-600 font-bold text-lg italic tracking-tight">
+                  {studentName === 'Necunoscut' ? 'Vă rugăm să vă spuneți numele...' : 'Lecția este în desfășurare...'}
+                </span>
               </div>
             </div>
           </div>
@@ -275,8 +286,8 @@ const App: React.FC = () => {
       
       {isSaving && (
         <div className="fixed bottom-10 right-10 bg-white border border-slate-200 text-slate-800 px-8 py-4 rounded-2xl text-sm font-bold flex items-center gap-4 academic-shadow animate-in slide-in-from-right-10 z-50">
-          <div className="w-3 h-3 bg-blue-600 rounded-full animate-spin"></div>
-          Sincronizare dosar [HH:mm:ss]...
+          <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+          Sincronizare jurnal [{studentName}]...
         </div>
       )}
     </div>
