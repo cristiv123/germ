@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage } from '@google/genai';
 import { ConnectionStatus, TranscriptionPart } from './types';
 import { decode, decodeAudioData, createPcmBlob } from './services/audioUtils';
 import { fetchAllConversations, saveConversation } from './services/supabase';
@@ -8,19 +8,16 @@ import MullerAvatar from './components/FaneAvatar';
 import TranscriptionView from './components/TranscriptionView';
 
 const CURRICULUM_DATA = `
-DATE DE INITIALIZARE (PROGRAMA):
-1. Gramatică: Diferența "Man soll" vs "Man sollte", întrebări indirecte, conectori temporali.
-2. Vocabular B2.2: Context academic, carieră, HR, prietenie și stima de sine.
-3. Expresii Fixe (NVV): in Erfüllung gehen, Rücksicht nehmen, einen Entschluss fassen.
+PROGRAMA:
+1. Gramatica: Man soll vs Man sollte, intrebari indirecte.
+2. Vocabular: Academic, cariera, HR.
+3. Expresii: in Erfüllung gehen, Rücksicht nehmen.
 `;
 
-const BASE_SYSTEM_INSTRUCTION = `Ești Herr Müller, profesor de germană academic.
-
-### PROTOCOLUL DE IDENTIFICARE (CRITIC) ###
-1. **Sarcina Ta Imediată**: Imediat ce începe sesiunea, salută și cere numele studentului. 
-2. **Blocaj**: NU preda nimic până nu ai primit un nume.
-3. **Confirmarea Înregistrării**: Când studentul își spune numele, confirmă obligatoriu folosind cuvântul cheie "înregistrat".
-
+const BASE_SYSTEM_INSTRUCTION = `Esti Herr Müller, profesor de germana.
+1. Saluta si cere numele studentului imediat.
+2. Nu preda nimic pana nu primesti un nume.
+3. Cand primesti numele, confirma obligatoriu cu "inregistrat".
 ${CURRICULUM_DATA}`;
 
 const App: React.FC = () => {
@@ -45,9 +42,12 @@ const App: React.FC = () => {
   const allHistoryContextRef = useRef<string>("");
 
   useEffect(() => {
-    console.log("[App] Componenta s-a montat.");
+    console.log("[App] Montat.");
     syncMemories();
-    return () => console.log("[App] Componenta se va demonta.");
+    return () => {
+      console.log("[App] Demontat.");
+      disconnect();
+    };
   }, []);
 
   const getTimestamp = () => {
@@ -56,81 +56,63 @@ const App: React.FC = () => {
   };
 
   const syncMemories = async () => {
-    console.log("[Supabase] Sincronizare memorii...");
     setIsLoadingMemories(true);
     try {
       const history = await fetchAllConversations();
-      console.log(`[Supabase] S-au găsit ${history.length} sesiuni anterioare.`);
-      const recentHistory = history.slice(-5);
-      let contextStr = "\n\n### ARHIVA ACADEMICĂ (Istoric Recent) ###\n";
+      const recentHistory = history.slice(-3); // Mai restrictiv pentru a evita erori de marime
+      let contextStr = "\nISTORIC RECENT:\n";
       recentHistory.forEach(entry => {
-        contextStr += `--- SESIUNE ${entry.date} ---\n${entry.content}\n\n`;
+        contextStr += `${entry.date}: ${entry.content.substring(0, 500)}...\n`;
       });
       allHistoryContextRef.current = contextStr;
     } catch (err) {
-      console.error("[Supabase] Eroare la încărcarea memoriei:", err);
+      console.error("[Supabase] Eroare memorie:", err);
     } finally {
       setIsLoadingMemories(false);
     }
   };
 
   const disconnect = useCallback(async () => {
-    // Evităm execuția multiplă dacă suntem deja IDLE
-    if (status === ConnectionStatus.IDLE && !sessionRef.current && !audioContextInRef.current) return;
+    if (status === ConnectionStatus.IDLE && !sessionRef.current) return;
 
-    console.log("[Audio] Deconectare și curățare resurse...");
+    console.log("[Audio] Deconectare...");
     const content = fullConversationTextRef.current;
     if (content && content.length > 15) {
       setIsSaving(true);
-      console.log("[Supabase] Salvare finală conversație...");
       try {
         await saveConversation(content);
-        console.log("[Supabase] Salvare finalizată cu succes.");
       } catch (e) {
-        console.error("[Supabase] Salvare eșuată la deconectare:", e);
+        console.error("[Supabase] Salvare esuata:", e);
       } finally {
-        setTimeout(() => setIsSaving(false), 2000);
+        setTimeout(() => setIsSaving(false), 1000);
       }
     }
 
-    // Resetăm starea UI imediat pentru a preveni interacțiuni duble
     setStatus(ConnectionStatus.IDLE);
     setIsListening(false);
     setIsSpeaking(false);
 
     if (sessionRef.current) {
-      console.log("[Gemini] Închidere sesiune active.");
       try { sessionRef.current.close(); } catch(e) {}
       sessionRef.current = null;
     }
 
     if (streamRef.current) {
-      console.log("[Audio] Oprire stream microfon.");
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
 
-    // Închidere AudioContext In cu verificare de stare
-    if (audioContextInRef.current) {
-      if (audioContextInRef.current.state !== 'closed') {
-        console.log("[Audio] Închidere AudioContext In.");
-        audioContextInRef.current.close().catch(e => console.debug("AudioContext In close suppressed:", e));
-      }
+    if (audioContextInRef.current && audioContextInRef.current.state !== 'closed') {
+      try { await audioContextInRef.current.close(); } catch(e) {}
       audioContextInRef.current = null;
     }
 
-    // Închidere AudioContext Out cu verificare de stare
-    if (audioContextOutRef.current) {
-      if (audioContextOutRef.current.state !== 'closed') {
-        console.log("[Audio] Închidere AudioContext Out.");
-        audioContextOutRef.current.close().catch(e => console.debug("AudioContext Out close suppressed:", e));
-      }
+    if (audioContextOutRef.current && audioContextOutRef.current.state !== 'closed') {
+      try { await audioContextOutRef.current.close(); } catch(e) {}
       audioContextOutRef.current = null;
     }
     
-    activeSourcesRef.current.forEach(s => {
-      try { s.stop(); } catch(e) {}
-    });
+    activeSourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
     activeSourcesRef.current.clear();
     
     setStudentName("Necunoscut");
@@ -140,9 +122,9 @@ const App: React.FC = () => {
   }, [status]);
 
   const connect = async () => {
-    console.log("[Gemini] Inițiere procedură conectare...");
-    if (!process.env.API_KEY) {
-      console.error("[Gemini] API_KEY lipsește. Verifică variabilele de mediu.");
+    const apiKey = process.env.API_KEY;
+    if (!apiKey || apiKey === 'undefined' || apiKey.length < 10) {
+      console.error("[Gemini] API_KEY lipseste sau este invalida.");
       setStatus(ConnectionStatus.ERROR);
       return;
     }
@@ -150,9 +132,7 @@ const App: React.FC = () => {
     try {
       setStatus(ConnectionStatus.CONNECTING);
       
-      console.log("[Audio] Cerere permisiune microfon...");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      console.log("[Audio] Microfon accesat.");
       streamRef.current = stream;
 
       const ctxIn = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
@@ -160,26 +140,24 @@ const App: React.FC = () => {
       
       await ctxIn.resume();
       await ctxOut.resume();
-      console.log("[Audio] AudioContext-uri pregătite. In:", ctxIn.state, "Out:", ctxOut.state);
       
       audioContextInRef.current = ctxIn;
       audioContextOutRef.current = ctxOut;
 
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const systemInstruction = `${BASE_SYSTEM_INSTRUCTION}\n${allHistoryContextRef.current}`;
+      const ai = new GoogleGenAI({ apiKey });
+      const systemInstruction = `${BASE_SYSTEM_INSTRUCTION}\n${allHistoryContextRef.current}`.replace(/[^\x20-\x7E\n]/g, ''); // Curatare caractere non-ASCII simple pentru siguranta
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
-          responseModalities: [Modality.AUDIO],
+          responseModalities: ['AUDIO'], // Folosim string explicit
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } } },
           systemInstruction: systemInstruction,
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
+          // Transcrierile sunt dezactivate temporar pentru a izola eroarea 1007
         },
         callbacks: {
           onopen: () => {
-            console.log("[Gemini] WebSocket deschis.");
+            console.log("[Gemini] Conectat.");
             setStatus(ConnectionStatus.CONNECTED);
             setIsListening(true);
             
@@ -187,47 +165,16 @@ const App: React.FC = () => {
             const processor = ctxIn.createScriptProcessor(4096, 1, 1);
             
             processor.onaudioprocess = (e) => {
-              if (sessionRef.current) {
-                const pcm = createPcmBlob(e.inputBuffer.getChannelData(0));
-                sessionRef.current.sendRealtimeInput({ media: pcm });
-              }
+              const pcm = createPcmBlob(e.inputBuffer.getChannelData(0));
+              sessionPromise.then(s => {
+                if (s) s.sendRealtimeInput({ media: pcm });
+              }).catch(() => {});
             };
             source.connect(processor);
             processor.connect(ctxIn.destination);
           },
           onmessage: async (msg: LiveServerMessage) => {
-            if (msg.serverContent?.inputTranscription) transcriptionBufferRef.current.user += msg.serverContent.inputTranscription.text;
-            if (msg.serverContent?.outputTranscription) transcriptionBufferRef.current.model += msg.serverContent.outputTranscription.text;
-            
-            if (msg.serverContent?.turnComplete) {
-              const u = transcriptionBufferRef.current.user.trim();
-              const m = transcriptionBufferRef.current.model.trim();
-              const ts = getTimestamp();
-
-              if (studentNameRef.current === "Necunoscut" && m.toLowerCase().includes("înregistrat")) {
-                const parts = m.split(/înregistrat,?\s*/i);
-                if (parts.length > 1) {
-                  const detected = parts[1].split(/[.!?\s,]/)[0].trim();
-                  if (detected) {
-                    studentNameRef.current = detected;
-                    setStudentName(detected);
-                    fullConversationTextRef.current = fullConversationTextRef.current.replace(/\[Necunoscut\]/g, `[${detected}]`);
-                  }
-                }
-              }
-
-              const nameToLog = studentNameRef.current;
-              if (u) {
-                fullConversationTextRef.current += `${ts} [${nameToLog}] Student: ${u}\n`;
-                setTranscription(prev => [...prev, { text: u, isUser: true, timestamp: Date.now() }]);
-              }
-              if (m) {
-                fullConversationTextRef.current += `${ts} [${nameToLog}] Prof. Müller: ${m}\n`;
-                setTranscription(prev => [...prev, { text: m, isUser: false, timestamp: Date.now() }]);
-              }
-              transcriptionBufferRef.current = { user: '', model: '' };
-            }
-
+            // Logica pentru audio primis
             const audio = msg.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (audio && audioContextOutRef.current) {
               const ctx = audioContextOutRef.current;
@@ -248,8 +195,8 @@ const App: React.FC = () => {
                 sourceNode.start(nextStartTimeRef.current);
                 nextStartTimeRef.current += buffer.duration;
                 activeSourcesRef.current.add(sourceNode);
-              } catch (decodeErr) {
-                console.error("[Audio] Eroare decodare:", decodeErr);
+              } catch (err) {
+                console.error("[Audio] Eroare decodare:", err);
               }
             }
 
@@ -261,19 +208,18 @@ const App: React.FC = () => {
             }
           },
           onerror: (err) => {
-            console.error("[Gemini] Eroare critică:", err);
+            console.error("[Gemini] Eroare:", err);
             setStatus(ConnectionStatus.ERROR);
           },
           onclose: (e) => {
-            console.warn("[Gemini] Sesiune închisă.", e.code, e.reason);
+            console.warn("[Gemini] Inchis:", e.code, e.reason);
             disconnect();
           }
         }
       });
       sessionRef.current = await sessionPromise;
-      console.log("[Gemini] Sesiune stabilită.");
     } catch (err) {
-      console.error("[Gemini] Conexiune eșuată:", err);
+      console.error("[Gemini] Esec:", err);
       setStatus(ConnectionStatus.ERROR);
     }
   };
@@ -289,73 +235,57 @@ const App: React.FC = () => {
           </div>
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Prof. <span className="text-blue-700">Müller</span></h1>
-            <div className="flex items-center gap-2">
-              <span className={`w-2.5 h-2.5 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></span>
-              <p className="text-slate-500 font-semibold uppercase text-[10px] tracking-widest">
-                {status === ConnectionStatus.CONNECTED ? `Sesiune activă: ${studentName}` : 'Academia de Limbi'}
-              </p>
-            </div>
+            <p className="text-slate-500 font-semibold uppercase text-[10px] tracking-widest flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-green-500' : 'bg-slate-300'}`}></span>
+              {status === ConnectionStatus.CONNECTED ? `Sesiune: ${studentName}` : 'Cabinet Academic'}
+            </p>
           </div>
         </div>
 
         {status === ConnectionStatus.CONNECTED && (
           <button 
             onClick={disconnect}
-            className="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white px-8 py-3 rounded-2xl font-bold transition-all border border-red-100 academic-shadow flex items-center gap-3 active:scale-95"
+            className="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white px-6 py-2 rounded-xl font-bold transition-all border border-red-100 active:scale-95"
           >
-            <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-            Termină Lecția
+            Ieșire
           </button>
         )}
       </header>
 
       <main className="flex-1 w-full max-w-5xl mx-auto flex flex-col">
         {status === ConnectionStatus.IDLE || status === ConnectionStatus.ERROR ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center px-6 animate-in fade-in duration-1000">
-            <div className="mb-6 p-4 bg-blue-50 rounded-full inline-block">
-              <span className="text-blue-700 font-bold text-lg px-6 py-2 italic uppercase tracking-wider">Protocol de Identificare Academică</span>
-            </div>
-            <h2 className="text-5xl md:text-7xl font-bold text-slate-900 mb-6 tracking-tight leading-tight">
-              Să începem <br/><span className="text-blue-700">noua lecție.</span>
-            </h2>
-            <p className="text-xl text-slate-500 mb-10 max-w-2xl font-medium">Pregătiți-vă pentru o sesiune interactivă. Profesorul vă va solicita numele pentru a sincroniza dosarul dumneavoastră.</p>
+          <div className="flex-1 flex flex-col items-center justify-center text-center px-6 animate-in fade-in duration-700">
+            <h2 className="text-5xl font-bold text-slate-900 mb-6">Willkommen!</h2>
+            <p className="text-xl text-slate-500 mb-10 max-w-2xl">Lecția de germană este gata. Profesorul Müller vă așteaptă pentru a începe conversația.</p>
             
             <button 
               onClick={connect}
               disabled={isLoadingMemories}
-              className={`group relative overflow-hidden px-20 py-8 rounded-3xl transition-all academic-shadow active:scale-95 ${isLoadingMemories ? 'bg-slate-200 cursor-wait' : 'bg-blue-700 hover:bg-blue-800 shadow-blue-200 shadow-2xl'}`}
+              className={`px-16 py-6 rounded-2xl text-xl font-bold text-white transition-all shadow-xl active:scale-95 ${isLoadingMemories ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-700 hover:bg-blue-800 shadow-blue-200'}`}
             >
-              <span className="relative z-10 text-2xl font-bold text-white uppercase tracking-wide">
-                {isLoadingMemories ? 'Se încarcă istoricul...' : 'Intră în Cabinet'}
-              </span>
+              {isLoadingMemories ? 'Se încarcă...' : 'Începe Lecția'}
             </button>
             {status === ConnectionStatus.ERROR && (
-              <div className="mt-8 p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 font-bold max-w-md">
-                <p>Eroare de conexiune (1007: Argument invalid sau rețea).</p>
-                <p className="text-sm font-normal mt-1 opacity-80 italic">Verifică permisiunile microfonului și consola (F12) pentru detalii.</p>
+              <div className="mt-8 text-red-600 font-bold bg-red-50 p-4 rounded-xl border border-red-200">
+                Eroare de conexiune. Te rugăm să verifici microfonul și să reîncerci.
               </div>
             )}
           </div>
         ) : (
-          <div className="flex-1 flex flex-col gap-6 animate-in slide-in-from-bottom-4 duration-500">
+          <div className="flex-1 flex flex-col gap-6 animate-in slide-in-from-bottom-4">
             <MullerAvatar isSpeaking={isSpeaking} isListening={isListening} status={status} />
             <TranscriptionView items={transcription} />
-            <div className="flex justify-center pb-6">
-              <div className="bg-white px-10 py-5 rounded-full flex items-center gap-4 academic-shadow border border-slate-100">
-                <div className={`w-3 h-3 rounded-full ${isListening ? 'bg-blue-600 animate-ping' : 'bg-slate-300'}`}></div>
-                <span className="text-slate-600 font-bold text-lg italic tracking-tight">
-                  {studentName === 'Necunoscut' ? 'Așteptăm identificarea numelui...' : 'Sesiunea Müller este securizată.'}
-                </span>
-              </div>
+            <div className="text-center text-slate-400 italic text-sm">
+              Sesiune audio activă...
             </div>
           </div>
         )}
       </main>
       
       {isSaving && (
-        <div className="fixed bottom-10 right-10 bg-white border border-slate-200 text-slate-800 px-8 py-4 rounded-2xl text-sm font-bold flex items-center gap-4 academic-shadow animate-in slide-in-from-right-10 z-50">
-          <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-          Sincronizare dosar [{studentName}]...
+        <div className="fixed bottom-6 right-6 bg-white border border-slate-200 p-4 rounded-xl text-xs font-bold academic-shadow flex items-center gap-2 animate-bounce">
+          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+          Se salvează...
         </div>
       )}
     </div>
