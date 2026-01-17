@@ -16,14 +16,16 @@ DATE DE INITIALIZARE (PROGRAMA):
 
 const BASE_SYSTEM_INSTRUCTION = `Ești Herr Müller, profesor de germană academic.
 
-### PROTOCOLUL DE IDENTIFICARE (OBLIGATORIU) ###
-1. **Salutul**: "Guten Tag! Ich bin Herr Müller, Ihr Deutschlehrer."
-2. **Identificarea**: Cere imediat numele studentului.
-3. **Blocaj**: NU preda nimic până nu primești numele. 
-4. **Confirmarea (IMPORTANT)**: Când primești numele (ex: Cristian), trebuie să răspunzi EXACT: "V-am înregistrat, [Nume]. Acum putem începe. Ce doriți să studiem?" (Folosește exact cuvântul "înregistrat" urmat de nume).
+### PROTOCOLUL DE IDENTIFICARE (CRITIC) ###
+1. **Sarcina Ta Imediată**: Imediat ce începe sesiunea (la primul semnal), salută și cere numele studentului. 
+   - Exemplu: "Guten Tag! Sunt Herr Müller. Înainte de a începe, vă rog să îmi spuneți numele dumneavoastră pentru a vă deschide dosarul academic."
+2. **Blocaj**: NU preda nimic, nu răspunde la întrebări de gramatică și nu face conversație până când nu ai primit un nume.
+3. **Confirmarea Înregistrării**: Când studentul își spune numele (ex: "Sunt Cristian"), confirmă OBLIGATORIU folosind cuvântul cheie "înregistrat".
+   - Exemplu: "V-am înregistrat, Cristian. Mă bucur să vă cunosc! Acum, ce doriți să studiem astăzi?"
+4. **Persistență**: Dacă studentul refuză sau evită, explică-i că fără nume nu poți salva progresul lecției în baza de date.
 
 ### REGULI DE LOGARE ###
-Fiecare mesaj va fi logat în formatul: [AAAA-LL-ZZ HH:mm:ss] [Nume] Rol: Mesaj.
+Fiecare mesaj trebuie să apară în log-ul intern cu timestamp și numele studentului.
 
 ${CURRICULUM_DATA}`;
 
@@ -36,7 +38,6 @@ const App: React.FC = () => {
   const [transcription, setTranscription] = useState<TranscriptionPart[]>([]);
   const [studentName, setStudentName] = useState<string>("Necunoscut");
   
-  // Ref-uri pentru stabilitate în callback-uri
   const studentNameRef = useRef<string>("Necunoscut");
   const audioContextInRef = useRef<AudioContext | null>(null);
   const audioContextOutRef = useRef<AudioContext | null>(null);
@@ -76,18 +77,18 @@ const App: React.FC = () => {
 
   const triggerSave = async () => {
     const content = fullConversationTextRef.current;
-    if (content) {
+    if (content && content.length > 10) {
       setIsSaving(true);
       try {
         await saveConversation(content);
       } finally {
-        setTimeout(() => setIsSaving(false), 1000);
+        setTimeout(() => setIsSaving(false), 1200);
       }
     }
   };
 
   useEffect(() => {
-    const timer = setInterval(triggerSave, 30000);
+    const timer = setInterval(triggerSave, 25000);
     return () => clearInterval(timer);
   }, []);
 
@@ -141,6 +142,7 @@ const App: React.FC = () => {
           onopen: () => {
             setStatus(ConnectionStatus.CONNECTED);
             setIsListening(true);
+            // Trimitem un semnal gol pentru a declanșa salutul și cererea numelui imediat
             sessionPromise.then(s => s.sendRealtimeInput({ media: { data: "", mimeType: 'audio/pcm;rate=16000' } }));
 
             const source = audioContextInRef.current!.createMediaStreamSource(stream);
@@ -161,28 +163,28 @@ const App: React.FC = () => {
               const m = transcriptionBufferRef.current.model.trim();
               const ts = getTimestamp();
 
-              // Detecție nume și "patching" retroactiv
+              // Detecție nume: profesorul trebuie să spună "înregistrat, [Nume]"
               if (studentNameRef.current === "Necunoscut" && m.toLowerCase().includes("înregistrat")) {
-                 const match = m.match(/înregistrat,?\s*([^.!?\s]+)/i);
-                 if (match) {
-                    const detected = match[1].replace(/[,.;]$/, "").trim();
+                const parts = m.split(/înregistrat,?\s*/i);
+                if (parts.length > 1) {
+                  const detected = parts[1].split(/[.!?\s,]/)[0].trim();
+                  if (detected) {
                     studentNameRef.current = detected;
                     setStudentName(detected);
-                    
-                    // Corectăm retroactiv toate intrările anterioare din sesiune care au rămas cu "Necunoscut"
-                    // Fix: replaced .replaceAll() with .replace() using a global regex for compatibility with older ES targets
+                    // Patch retroactiv pentru log-urile de la începutul sesiunii
                     fullConversationTextRef.current = fullConversationTextRef.current.replace(/\[Necunoscut\]/g, `[${detected}]`);
-                 }
+                  }
+                }
               }
 
-              const currentName = studentNameRef.current;
+              const nameToLog = studentNameRef.current;
 
               if (u) {
-                fullConversationTextRef.current += `${ts} [${currentName}] Student: ${u}\n`;
+                fullConversationTextRef.current += `${ts} [${nameToLog}] Student: ${u}\n`;
                 setTranscription(prev => [...prev, { text: u, isUser: true, timestamp: Date.now() }]);
               }
               if (m) {
-                fullConversationTextRef.current += `${ts} [${currentName}] Prof. Müller: ${m}\n`;
+                fullConversationTextRef.current += `${ts} [${nameToLog}] Prof. Müller: ${m}\n`;
                 setTranscription(prev => [...prev, { text: m, isUser: false, timestamp: Date.now() }]);
               }
               transcriptionBufferRef.current = { user: '', model: '' };
@@ -230,7 +232,7 @@ const App: React.FC = () => {
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></span>
               <p className="text-slate-500 font-semibold uppercase text-[10px] tracking-widest">
-                {status === ConnectionStatus.CONNECTED ? `Identificat: ${studentName}` : 'Academia Academică'}
+                {status === ConnectionStatus.CONNECTED ? `Sesiune: ${studentName}` : 'Academia de Limbi'}
               </p>
             </div>
           </div>
@@ -251,22 +253,23 @@ const App: React.FC = () => {
         {status === ConnectionStatus.IDLE || status === ConnectionStatus.ERROR ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-6 animate-in fade-in duration-1000">
             <div className="mb-6 p-4 bg-blue-50 rounded-full inline-block">
-              <span className="text-blue-700 font-bold text-lg px-6 py-2 italic uppercase tracking-wider">Identificare & Jurnal Academic</span>
+              <span className="text-blue-700 font-bold text-lg px-6 py-2 italic uppercase tracking-wider">Protocol de Identificare</span>
             </div>
             <h2 className="text-5xl md:text-7xl font-bold text-slate-900 mb-6 tracking-tight leading-tight">
-              Să începem <br/><span className="text-blue-700">sesiunea de astăzi.</span>
+              Să începem <br/><span className="text-blue-700">lecția de astăzi.</span>
             </h2>
-            <p className="text-xl text-slate-500 mb-10 max-w-2xl font-medium">Jurnalul va înregistra automat data, ora și numele dumneavoastră la fiecare mesaj.</p>
+            <p className="text-xl text-slate-500 mb-10 max-w-2xl font-medium italic">Herr Müller are nevoie de numele dumneavoastră pentru a vă putea înregistra progresul corect în baza de date.</p>
             
             <button 
               onClick={connect}
               disabled={isLoadingMemories}
-              className={`group relative overflow-hidden px-20 py-8 rounded-3xl transition-all academic-shadow active:scale-95 ${isLoadingMemories ? 'bg-slate-200' : 'bg-blue-700 hover:bg-blue-800 shadow-blue-200 shadow-2xl'}`}
+              className={`group relative overflow-hidden px-20 py-8 rounded-3xl transition-all academic-shadow active:scale-95 ${isLoadingMemories ? 'bg-slate-200 cursor-wait' : 'bg-blue-700 hover:bg-blue-800 shadow-blue-200 shadow-2xl'}`}
             >
               <span className="relative z-10 text-2xl font-bold text-white uppercase tracking-wide">
-                {isLoadingMemories ? 'Pregătim Arhiva...' : 'Intră în Lecție'}
+                {isLoadingMemories ? 'Sincronizăm Dosarele...' : 'Intră în Lecție'}
               </span>
             </button>
+            {status === ConnectionStatus.ERROR && <p className="mt-4 text-red-500 font-bold">A apărut o eroare de conexiune. Reîncercați.</p>}
           </div>
         ) : (
           <div className="flex-1 flex flex-col gap-6 animate-in slide-in-from-bottom-4 duration-500">
@@ -276,7 +279,7 @@ const App: React.FC = () => {
               <div className="bg-white px-10 py-5 rounded-full flex items-center gap-4 academic-shadow border border-slate-100">
                 <div className="w-3 h-3 bg-blue-600 rounded-full animate-ping"></div>
                 <span className="text-slate-600 font-bold text-lg italic tracking-tight">
-                  {studentName === 'Necunoscut' ? 'Vă rugăm să vă spuneți numele...' : 'Lecția este în desfășurare...'}
+                  {studentName === 'Necunoscut' ? 'Spuneți-i profesorului numele dumneavoastră...' : 'Lecția interactivă a început...'}
                 </span>
               </div>
             </div>
@@ -286,8 +289,8 @@ const App: React.FC = () => {
       
       {isSaving && (
         <div className="fixed bottom-10 right-10 bg-white border border-slate-200 text-slate-800 px-8 py-4 rounded-2xl text-sm font-bold flex items-center gap-4 academic-shadow animate-in slide-in-from-right-10 z-50">
-          <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-          Sincronizare jurnal [{studentName}]...
+          <div className="w-3 h-3 bg-blue-600 rounded-full animate-spin"></div>
+          Salvare în dosarul [{studentName}]...
         </div>
       )}
     </div>
