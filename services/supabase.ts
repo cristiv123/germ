@@ -71,7 +71,9 @@ export async function fetchTodayConversation(): Promise<string | null> {
 }
 
 /**
- * Salvează sau actualizează conversația zilei curente.
+ * Salvează conversația prin concatenare.
+ * Verifică dacă există deja date pentru ziua curentă și adaugă noua sesiune la final,
+ * protejând astfel munca altor studenți care au învățat în aceeași zi.
  */
 export async function saveConversation(content: string) {
   if (!content || !supabase) return;
@@ -79,12 +81,21 @@ export async function saveConversation(content: string) {
   const today = new Date().toISOString().split('T')[0];
 
   try {
+    // 1. Preluăm ce există deja în baza de date pentru ziua de azi
+    const existingContent = await fetchTodayConversation();
+    
+    // 2. Concatenăm: păstrăm vechiul conținut și adăugăm noul bloc de conversație
+    const finalContent = existingContent 
+      ? `${existingContent}\n\n--- SESIUNE NOUĂ ---\n${content}` 
+      : content;
+
+    // 3. Folosim upsert pe cheia 'conversation_date' pentru a actualiza rândul existent cu blocul combinat
     const { error } = await supabase
       .from('daily_conversations')
       .upsert(
         { 
           conversation_date: today, 
-          content: content,
+          content: finalContent,
           updated_at: new Date().toISOString()
         }, 
         { onConflict: 'conversation_date' }
@@ -97,6 +108,6 @@ export async function saveConversation(content: string) {
       throw error;
     }
   } catch (err) {
-    console.error('Eroare la salvarea în DB:', err);
+    console.error('Eroare la salvarea prin concatenare în DB:', err);
   }
 }
