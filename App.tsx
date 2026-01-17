@@ -4,20 +4,33 @@ import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
 import { ConnectionStatus, TranscriptionPart } from './types';
 import { decode, decodeAudioData, createPcmBlob } from './services/audioUtils';
 import { fetchAllConversations, saveConversation } from './services/supabase';
-import MullerAvatar from './components/FaneAvatar'; // Reusing the visual component logic
+import MullerAvatar from './components/FaneAvatar';
 import TranscriptionView from './components/TranscriptionView';
 
-const BASE_SYSTEM_INSTRUCTION = `Ești Herr Müller, un profesor de limba germană extrem de dedicat, răbdător și profesionist. 
-Scopul tău este să ajuți elevul să învețe germana într-un mod interactiv și corect.
+const CURRICULUM_DATA = `
+DATE DE INITIALIZARE (PROGRAMA):
+1. Gramatică: Diferența "Man soll" vs "Man sollte", întrebări indirecte (ob/wie lange), conectori temporali (nachdem, sobald, bis).
+2. Vocabular B2.2: Context academic (Bologna, Heidelberg), carieră (die Qual der Wahl, unter Druck stehen).
+3. Expresii Fixe (NVV): in Erfüllung gehen, Rücksicht nehmen, einen Entschluss fassen, zum Einsatz kommen.
+4. Tematici Sociale: Prietenia (sich bewähren, Geborgenheit), stima de sine (Einfluss haben auf), HR (Arbeitsbedingungen, Aufstiegschancen).
+5. Adverbe de Timp: vorhin, neulich, davor, demnächst, ab und zu.
+`;
 
-STILUL TĂU:
-1. Vorbește calm, clar și folosește o dicție impecabilă.
-2. Când elevul greșește, corectează-l cu blândețe, explicând pe scurt regula gramaticală în română, dar menținând conversația în germană pe cât posibil.
-3. Începe cu "Guten Tag!" sau "Hallo!" și încurajează elevul constant (ex: "Sehr gut!", "Ausgezeichnet!").
-4. MEMORIA ACADEMICĂ: Folosește istoricul de mai jos pentru a reveni asupra cuvintelor sau regulilor pe care elevul nu le știa în lecțiile trecute.
-5. Fii structurat: Propune teme de discuție (ex: la cumpărături, la medic, despre familie) dacă elevul nu are o inițiativă.
+const BASE_SYSTEM_INSTRUCTION = `Ești Herr Müller, un profesor de germană empatic și structurat.
 
-CONTEXTUL LECȚIILOR ANTERIOARE:`;
+### PROTOCOLUL DE START ###
+1. **Prezentare & Identificare**: Salută-l pe student ("Guten Tag! Ich bin Herr Müller") și cere-i numele pentru a-i deschide dosarul academic.
+2. **Propunere Flexibilă**: După identificare, menționează că poți preda orice din programa academică (Gramatică, NVV-uri, Lumea Profesională sau Psihologia Relațiilor). 
+3. **Sugestii (Opționale)**: Fă 2-3 propuneri concrete bazate pe datele de inițializare (ex: "Am putea discuta despre expresiile fixe precum 'in Erfüllung gehen' sau despre folosirea corectă a conectorilor temporali").
+4. **Decizia Studentului**: Întreabă studentul: "Was möchten Sie heute lernen? Ce doriți să studiem astăzi?". Așteaptă decizia lui; nu este obligat să aleagă propunerile tale.
+
+STIL DE PREDARE:
+- Dacă studentul alege un subiect, începe cu o scurtă explicație teoretică și apoi treci la exerciții practice (dialog).
+- Corectează greșelile de gramatică imediat, folosind numele studentului.
+
+${CURRICULUM_DATA}
+
+### ARHIVA DOSARELOR ACADEMICE (Istoric) ###`;
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.IDLE);
@@ -53,14 +66,10 @@ const App: React.FC = () => {
       const history = await fetchAllConversations();
       const todayStr = new Date().toISOString().split('T')[0];
       
-      let contextStr = "\n\n### RAPORTUL DE PROGRES AL ELEVULUI ###\n";
+      let contextStr = "\n\n### ISTORIC STUDENTI ###\n";
       
-      if (history.length === 0) {
-        contextStr += "Prima lecție. Evaluează nivelul elevului și fii încurajator.\n";
-      }
-
       history.forEach(entry => {
-        contextStr += `--- LECȚIA DIN DATA: ${entry.date} ---\n${entry.content}\n\n`;
+        contextStr += `--- DATA: ${entry.date} ---\n${entry.content}\n\n`;
         
         if (!isBackground && entry.date === todayStr && !fullConversationTextRef.current) {
           fullConversationTextRef.current = entry.content;
@@ -124,7 +133,7 @@ const App: React.FC = () => {
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } } }, // Charon sounds more mature and academic
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } } },
           systemInstruction: `${BASE_SYSTEM_INSTRUCTION}\n${allHistoryContextRef.current}`,
           inputAudioTranscription: {},
           outputAudioTranscription: {},
@@ -133,6 +142,12 @@ const App: React.FC = () => {
           onopen: () => {
             setStatus(ConnectionStatus.CONNECTED);
             setIsListening(true);
+            
+            // Trigger proactiv: Salutul și cererea numelui
+            sessionPromise.then(s => {
+              s.sendRealtimeInput({ media: { data: "", mimeType: 'audio/pcm;rate=16000' } });
+            });
+
             const source = audioContextInRef.current!.createMediaStreamSource(stream);
             const processor = audioContextInRef.current!.createScriptProcessor(4096, 1, 1);
             processor.onaudioprocess = (e) => {
@@ -190,7 +205,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-100 p-4 md:p-8">
+    <div className="min-h-screen flex flex-col bg-slate-100 p-4 md:p-8 text-slate-900">
       <header className="w-full max-w-5xl mx-auto flex justify-between items-center mb-8 bg-white p-6 rounded-3xl academic-shadow">
         <div className="flex items-center gap-5">
           <div className="w-16 h-16 bg-blue-700 rounded-2xl flex items-center justify-center shadow-lg">
@@ -199,43 +214,42 @@ const App: React.FC = () => {
             </svg>
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Prof. <span className="text-blue-700">Müller</span></h1>
+            <h1 className="text-3xl font-bold tracking-tight">Prof. <span className="text-blue-700">Müller</span></h1>
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></span>
               <p className="text-slate-500 font-semibold uppercase text-xs tracking-widest">
-                {status === ConnectionStatus.CONNECTED ? 'Sesiune activă' : 'Academia Müller'}
+                {status === ConnectionStatus.CONNECTED ? 'Lecție individuală' : 'Academia Müller'}
               </p>
             </div>
           </div>
         </div>
 
         <div className="hidden md:flex flex-col items-end gap-1">
-          {isMemoryRefreshing && <div className="text-blue-600 font-bold animate-pulse text-[10px] tracking-widest uppercase">Actualizez raportul...</div>}
-          {lastMemoryUpdate && <div className="text-slate-400 text-xs font-medium uppercase">Ultima sincronizare: {lastMemoryUpdate}</div>}
+          {isMemoryRefreshing && <div className="text-blue-600 font-bold animate-pulse text-[10px] tracking-widest uppercase">Consultăm programa...</div>}
+          {lastMemoryUpdate && <div className="text-slate-400 text-xs font-medium uppercase italic">Sincronizat: {lastMemoryUpdate}</div>}
         </div>
       </header>
 
       <main className="flex-1 w-full max-w-5xl mx-auto flex flex-col">
         {status === ConnectionStatus.IDLE || status === ConnectionStatus.ERROR ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
-            <div className="mb-10 p-4 bg-blue-50 rounded-full">
-              <span className="text-blue-700 font-bold text-lg px-6 py-2">Willkommen zur Deutschstunde!</span>
+            <div className="mb-6 p-4 bg-blue-50 rounded-full inline-block">
+              <span className="text-blue-700 font-bold text-lg px-6 py-2 italic uppercase tracking-wider">Lecție Flexibilă & Interactivă</span>
             </div>
             <h2 className="text-5xl md:text-7xl font-bold text-slate-900 mb-6 tracking-tight leading-tight">
-              Sunteți gata pentru <br/><span className="text-blue-700">Lecția de Germană?</span>
+              Alegeți orice temă <br/><span className="text-blue-700">pentru astăzi.</span>
             </h2>
-            <p className="text-xl text-slate-500 mb-12 max-w-xl font-medium">Herr Müller vă așteaptă să exersați pronunția și gramatica într-un mod natural.</p>
+            <p className="text-xl text-slate-500 mb-10 max-w-2xl font-medium italic">Herr Müller vă va face câteva sugestii bazate pe programa B2.2, dar decizia finală vă aparține. Sunteți gata să începeți?</p>
             
             <button 
               onClick={connect}
               disabled={isLoadingMemories}
-              className={`group relative overflow-hidden px-16 py-8 rounded-3xl transition-all academic-shadow active:scale-95 ${isLoadingMemories ? 'bg-slate-200' : 'bg-blue-700 hover:bg-blue-800'}`}
+              className={`group relative overflow-hidden px-16 py-8 rounded-3xl transition-all academic-shadow active:scale-95 ${isLoadingMemories ? 'bg-slate-200 cursor-wait' : 'bg-blue-700 hover:bg-blue-800'}`}
             >
               <span className="relative z-10 text-2xl font-bold text-white uppercase tracking-wide">
-                {isLoadingMemories ? 'Pregătesc materialele...' : 'Începe Lecția'}
+                {isLoadingMemories ? 'Se încarcă programa...' : 'Să începem Lecția'}
               </span>
             </button>
-            {status === ConnectionStatus.ERROR && <p className="mt-6 text-red-600 font-bold text-lg italic">Eroare de conexiune. Vă rog să reîncercați.</p>}
           </div>
         ) : (
           <div className="flex-1 flex flex-col gap-6">
@@ -244,7 +258,7 @@ const App: React.FC = () => {
             <div className="flex justify-center pb-6">
               <div className="bg-white px-10 py-5 rounded-full flex items-center gap-4 academic-shadow border border-slate-100">
                 <div className="w-3 h-3 bg-blue-600 rounded-full animate-ping"></div>
-                <span className="text-slate-600 font-bold text-lg italic">Vă ascult cu atenție...</span>
+                <span className="text-slate-600 font-bold text-lg italic tracking-tight italic">Profesorul așteaptă propunerea dumneavoastră...</span>
               </div>
             </div>
           </div>
@@ -252,11 +266,11 @@ const App: React.FC = () => {
       </main>
       
       {isSaving && (
-        <div className="fixed bottom-10 right-10 bg-white border border-slate-200 text-slate-800 px-8 py-4 rounded-2xl text-sm font-bold flex items-center gap-4 academic-shadow animate-in slide-in-from-right-10">
+        <div className="fixed bottom-10 right-10 bg-white border border-slate-200 text-slate-800 px-8 py-4 rounded-2xl text-sm font-bold flex items-center gap-4 academic-shadow animate-in slide-in-from-right-10 z-50">
           <svg className="w-5 h-5 text-blue-600 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
-          Salvez progresul elevului...
+          Salvare progres în dosar...
         </div>
       )}
     </div>
