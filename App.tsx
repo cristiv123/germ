@@ -17,9 +17,9 @@ DATE DE INITIALIZARE (PROGRAMA):
 const BASE_SYSTEM_INSTRUCTION = `Ești Herr Müller, profesor de germană academic.
 
 ### PROTOCOLUL DE IDENTIFICARE (CRITIC) ###
-1. **Sarcina Ta Imediată**: Imediat ce începe sesiunea (la primul semnal), salută și cere numele studentului. 
+1. **Sarcina Ta Imediată**: Imediat ce începe sesiunea, salută și cere numele studentului. 
 2. **Blocaj**: NU preda nimic până nu ai primit un nume.
-3. **Confirmarea Înregistrării**: Când studentul își spune numele, confirmă folosind cuvântul cheie "înregistrat".
+3. **Confirmarea Înregistrării**: Când studentul își spune numele, confirmă obligatoriu folosind cuvântul cheie "înregistrat".
 
 ${CURRICULUM_DATA}`;
 
@@ -61,8 +61,9 @@ const App: React.FC = () => {
     try {
       const history = await fetchAllConversations();
       console.log(`[Supabase] S-au găsit ${history.length} sesiuni anterioare.`);
-      let contextStr = "\n\n### ARHIVA ACADEMICĂ (Istoric) ###\n";
-      history.forEach(entry => {
+      const recentHistory = history.slice(-5);
+      let contextStr = "\n\n### ARHIVA ACADEMICĂ (Istoric Recent) ###\n";
+      recentHistory.forEach(entry => {
         contextStr += `--- SESIUNE ${entry.date} ---\n${entry.content}\n\n`;
       });
       allHistoryContextRef.current = contextStr;
@@ -74,6 +75,9 @@ const App: React.FC = () => {
   };
 
   const disconnect = useCallback(async () => {
+    // Evităm execuția multiplă dacă suntem deja IDLE
+    if (status === ConnectionStatus.IDLE && !sessionRef.current && !audioContextInRef.current) return;
+
     console.log("[Audio] Deconectare și curățare resurse...");
     const content = fullConversationTextRef.current;
     if (content && content.length > 15) {
@@ -89,23 +93,39 @@ const App: React.FC = () => {
       }
     }
 
+    // Resetăm starea UI imediat pentru a preveni interacțiuni duble
+    setStatus(ConnectionStatus.IDLE);
+    setIsListening(false);
+    setIsSpeaking(false);
+
     if (sessionRef.current) {
       console.log("[Gemini] Închidere sesiune active.");
-      sessionRef.current.close();
+      try { sessionRef.current.close(); } catch(e) {}
       sessionRef.current = null;
     }
+
     if (streamRef.current) {
       console.log("[Audio] Oprire stream microfon.");
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
+
+    // Închidere AudioContext In cu verificare de stare
     if (audioContextInRef.current) {
-      console.log("[Audio] Închidere AudioContext In.");
-      audioContextInRef.current.close().catch(console.error);
+      if (audioContextInRef.current.state !== 'closed') {
+        console.log("[Audio] Închidere AudioContext In.");
+        audioContextInRef.current.close().catch(e => console.debug("AudioContext In close suppressed:", e));
+      }
+      audioContextInRef.current = null;
     }
+
+    // Închidere AudioContext Out cu verificare de stare
     if (audioContextOutRef.current) {
-      console.log("[Audio] Închidere AudioContext Out.");
-      audioContextOutRef.current.close().catch(console.error);
+      if (audioContextOutRef.current.state !== 'closed') {
+        console.log("[Audio] Închidere AudioContext Out.");
+        audioContextOutRef.current.close().catch(e => console.debug("AudioContext Out close suppressed:", e));
+      }
+      audioContextOutRef.current = null;
     }
     
     activeSourcesRef.current.forEach(s => {
@@ -113,19 +133,16 @@ const App: React.FC = () => {
     });
     activeSourcesRef.current.clear();
     
-    setStatus(ConnectionStatus.IDLE);
-    setIsListening(false);
-    setIsSpeaking(false);
     setStudentName("Necunoscut");
     studentNameRef.current = "Necunoscut";
     fullConversationTextRef.current = "";
     setTranscription([]);
-  }, []);
+  }, [status]);
 
   const connect = async () => {
     console.log("[Gemini] Inițiere procedură conectare...");
     if (!process.env.API_KEY) {
-      console.error("[Gemini] API_KEY lipsește din mediu.");
+      console.error("[Gemini] API_KEY lipsește. Verifică variabilele de mediu.");
       setStatus(ConnectionStatus.ERROR);
       return;
     }
@@ -135,56 +152,45 @@ const App: React.FC = () => {
       
       console.log("[Audio] Cerere permisiune microfon...");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      console.log("[Audio] Microfon accesat cu succes.");
+      console.log("[Audio] Microfon accesat.");
       streamRef.current = stream;
 
       const ctxIn = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       const ctxOut = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       
-      console.log("[Audio] AudioContext-uri create. Stare In:", ctxIn.state, "Stare Out:", ctxOut.state);
       await ctxIn.resume();
       await ctxOut.resume();
-      console.log("[Audio] AudioContext-uri reluate. Stare In:", ctxIn.state, "Stare Out:", ctxOut.state);
+      console.log("[Audio] AudioContext-uri pregătite. In:", ctxIn.state, "Out:", ctxOut.state);
       
       audioContextInRef.current = ctxIn;
       audioContextOutRef.current = ctxOut;
 
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      console.log("[Gemini] Client AI inițializat.");
-      
+      const systemInstruction = `${BASE_SYSTEM_INSTRUCTION}\n${allHistoryContextRef.current}`;
+
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } } },
-          systemInstruction: `${BASE_SYSTEM_INSTRUCTION}\n${allHistoryContextRef.current}`,
+          systemInstruction: systemInstruction,
           inputAudioTranscription: {},
           outputAudioTranscription: {},
         },
         callbacks: {
           onopen: () => {
-            console.log("[Gemini] Conexiune deschisă!");
+            console.log("[Gemini] WebSocket deschis.");
             setStatus(ConnectionStatus.CONNECTED);
             setIsListening(true);
             
-            // Trimite un mic pachet vid pentru a trezi profesorul
-            sessionPromise.then(s => {
-               console.log("[Gemini] Trimitere wake-up input.");
-               s.sendRealtimeInput({ media: { data: "", mimeType: 'audio/pcm;rate=16000' } });
-            });
-
             const source = ctxIn.createMediaStreamSource(stream);
             const processor = ctxIn.createScriptProcessor(4096, 1, 1);
             
-            let lastMicLog = 0;
             processor.onaudioprocess = (e) => {
-              const now = Date.now();
-              if (now - lastMicLog > 5000) {
-                console.log("[Audio] Stream microfon activ (log la 5s).");
-                lastMicLog = now;
+              if (sessionRef.current) {
+                const pcm = createPcmBlob(e.inputBuffer.getChannelData(0));
+                sessionRef.current.sendRealtimeInput({ media: pcm });
               }
-              const pcm = createPcmBlob(e.inputBuffer.getChannelData(0));
-              sessionPromise.then(s => s.sendRealtimeInput({ media: pcm }));
             };
             source.connect(processor);
             processor.connect(ctxIn.destination);
@@ -196,7 +202,6 @@ const App: React.FC = () => {
             if (msg.serverContent?.turnComplete) {
               const u = transcriptionBufferRef.current.user.trim();
               const m = transcriptionBufferRef.current.model.trim();
-              console.log("[Gemini] Rând complet. User:", u, "Model:", m);
               const ts = getTimestamp();
 
               if (studentNameRef.current === "Necunoscut" && m.toLowerCase().includes("înregistrat")) {
@@ -204,7 +209,6 @@ const App: React.FC = () => {
                 if (parts.length > 1) {
                   const detected = parts[1].split(/[.!?\s,]/)[0].trim();
                   if (detected) {
-                    console.log("[Logic] Nume detectat:", detected);
                     studentNameRef.current = detected;
                     setStudentName(detected);
                     fullConversationTextRef.current = fullConversationTextRef.current.replace(/\[Necunoscut\]/g, `[${detected}]`);
@@ -227,10 +231,7 @@ const App: React.FC = () => {
             const audio = msg.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (audio && audioContextOutRef.current) {
               const ctx = audioContextOutRef.current;
-              if (ctx.state === 'suspended') {
-                console.warn("[Audio] Context Out suspendat la primire audio, reluăm...");
-                await ctx.resume();
-              }
+              if (ctx.state === 'suspended') await ctx.resume();
 
               setIsSpeaking(true);
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
@@ -242,43 +243,37 @@ const App: React.FC = () => {
                 sourceNode.connect(ctx.destination);
                 sourceNode.onended = () => {
                   activeSourcesRef.current.delete(sourceNode);
-                  if (activeSourcesRef.current.size === 0) {
-                    setIsSpeaking(false);
-                    console.log("[Audio] Redare lot audio finalizată.");
-                  }
+                  if (activeSourcesRef.current.size === 0) setIsSpeaking(false);
                 };
                 sourceNode.start(nextStartTimeRef.current);
                 nextStartTimeRef.current += buffer.duration;
                 activeSourcesRef.current.add(sourceNode);
               } catch (decodeErr) {
-                console.error("[Audio] Eroare la decodarea audio:", decodeErr);
+                console.error("[Audio] Eroare decodare:", decodeErr);
               }
             }
 
             if (msg.serverContent?.interrupted) {
-              console.log("[Gemini] Modelul a fost întrerupt.");
-              activeSourcesRef.current.forEach(s => {
-                try { s.stop(); } catch(e) {}
-              });
+              activeSourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
               activeSourcesRef.current.clear();
               nextStartTimeRef.current = 0;
               setIsSpeaking(false);
             }
           },
           onerror: (err) => {
-            console.error("[Gemini] Eroare Sesiune Live:", err);
+            console.error("[Gemini] Eroare critică:", err);
             setStatus(ConnectionStatus.ERROR);
           },
           onclose: (e) => {
-            console.warn("[Gemini] Sesiune închisă de server.", e);
+            console.warn("[Gemini] Sesiune închisă.", e.code, e.reason);
             disconnect();
           }
         }
       });
       sessionRef.current = await sessionPromise;
-      console.log("[Gemini] Sesiunea a fost stabilită cu succes.");
+      console.log("[Gemini] Sesiune stabilită.");
     } catch (err) {
-      console.error("[Gemini] Eșec la conectare:", err);
+      console.error("[Gemini] Conexiune eșuată:", err);
       setStatus(ConnectionStatus.ERROR);
     }
   };
@@ -323,7 +318,7 @@ const App: React.FC = () => {
             <h2 className="text-5xl md:text-7xl font-bold text-slate-900 mb-6 tracking-tight leading-tight">
               Să începem <br/><span className="text-blue-700">noua lecție.</span>
             </h2>
-            <p className="text-xl text-slate-500 mb-10 max-w-2xl font-medium">Asigurați-vă că microfonul funcționează. Profesorul vă va cere numele pentru a deschide dosarul academic.</p>
+            <p className="text-xl text-slate-500 mb-10 max-w-2xl font-medium">Pregătiți-vă pentru o sesiune interactivă. Profesorul vă va solicita numele pentru a sincroniza dosarul dumneavoastră.</p>
             
             <button 
               onClick={connect}
@@ -336,8 +331,8 @@ const App: React.FC = () => {
             </button>
             {status === ConnectionStatus.ERROR && (
               <div className="mt-8 p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 font-bold max-w-md">
-                <p>Eroare de conexiune sau microfon blocat.</p>
-                <p className="text-sm font-normal mt-1 opacity-80 italic">Verifică consola (F12) pentru log-uri detaliate.</p>
+                <p>Eroare de conexiune (1007: Argument invalid sau rețea).</p>
+                <p className="text-sm font-normal mt-1 opacity-80 italic">Verifică permisiunile microfonului și consola (F12) pentru detalii.</p>
               </div>
             )}
           </div>
@@ -349,7 +344,7 @@ const App: React.FC = () => {
               <div className="bg-white px-10 py-5 rounded-full flex items-center gap-4 academic-shadow border border-slate-100">
                 <div className={`w-3 h-3 rounded-full ${isListening ? 'bg-blue-600 animate-ping' : 'bg-slate-300'}`}></div>
                 <span className="text-slate-600 font-bold text-lg italic tracking-tight">
-                  {studentName === 'Necunoscut' ? 'Așteptăm identificarea numelui...' : 'Lecția este activă...'}
+                  {studentName === 'Necunoscut' ? 'Așteptăm identificarea numelui...' : 'Sesiunea Müller este securizată.'}
                 </span>
               </div>
             </div>
