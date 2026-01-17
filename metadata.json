@@ -1,6 +1,6 @@
 {
-  "name": "germ",
-  "description": "Un asistent AI empatic și blând, creat special pentru persoanele în vârstă, folosind tehnologia Gemini Live Audio pentru conversații naturale în timp real.",
+  "name": "Academia Muller",
+  "description": "Un asistent AI sub formă de profesor de limba germană, creat pentru învățare interactivă în timp real folosind Gemini Live Audio.",
   "requestFramePermissions": [
     "microphone"
   ]

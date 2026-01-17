@@ -1,39 +1,41 @@
 
 import React from 'react';
 
-interface FaneAvatarProps {
+interface MullerAvatarProps {
   isSpeaking: boolean;
   isListening: boolean;
   status: string;
 }
 
-const FaneAvatar: React.FC<FaneAvatarProps> = ({ isSpeaking, isListening, status }) => {
+const MullerAvatar: React.FC<MullerAvatarProps> = ({ isSpeaking, isListening, status }) => {
   return (
-    <div className="relative flex items-center justify-center w-64 h-64 mx-auto mb-8">
-      {/* Pulse rings - Neon Purple/Blue */}
+    <div className="relative flex items-center justify-center w-60 h-60 mx-auto mb-6">
+      {/* Subtle pulse for active session */}
       {isListening && (
-        <>
-          <div className="absolute inset-0 bg-purple-500 rounded-full animate-ping opacity-20"></div>
-          <div className="absolute inset-4 bg-blue-500 rounded-full animate-pulse opacity-30"></div>
-        </>
+        <div className="absolute inset-0 bg-blue-100 rounded-full animate-pulse opacity-50"></div>
       )}
 
       {/* Main Avatar Circle */}
       <div className={`
-        relative z-10 w-48 h-48 rounded-[3rem] flex items-center justify-center transition-all duration-500 border-4
-        ${isSpeaking ? 'scale-105 shadow-[0_0_30px_rgba(99,102,241,0.6)] border-indigo-400 bg-indigo-900' : 'bg-slate-800 border-slate-700 shadow-xl'}
-        ${status === 'ERROR' ? 'border-red-500 bg-red-900/20' : ''}
+        relative z-10 w-44 h-44 rounded-full flex items-center justify-center transition-all duration-500 border-4 academic-shadow
+        ${isSpeaking ? 'scale-105 border-blue-600 bg-white' : 'bg-slate-50 border-slate-200'}
+        ${status === 'ERROR' ? 'border-red-400 bg-red-50' : ''}
       `}>
-        {/* Cool Face with Sunglasses SVG */}
-        <svg viewBox="0 0 100 100" className="w-28 h-28 text-white fill-current">
-          {/* Sunglasses */}
-          <path d="M20 40 L45 40 L45 50 Q45 60 32.5 60 Q20 60 20 50 Z" />
-          <path d="M55 40 L80 40 L80 50 Q80 60 67.5 60 Q55 60 55 50 Z" />
-          <path d="M45 45 L55 45" stroke="white" strokeWidth="2" />
-          {/* Smirk */}
+        {/* Intellectual Face SVG */}
+        <svg viewBox="0 0 100 100" className={`w-24 h-24 transition-colors duration-300 ${isSpeaking ? 'text-blue-700' : 'text-slate-600'}`}>
+          {/* Eyeglasses */}
+          <circle cx="35" cy="45" r="12" fill="none" stroke="currentColor" strokeWidth="2.5" />
+          <circle cx="65" cy="45" r="12" fill="none" stroke="currentColor" strokeWidth="2.5" />
+          <path d="M47 45 L53 45" stroke="currentColor" strokeWidth="2.5" />
+          
+          {/* Eyes */}
+          <circle cx="35" cy="45" r="2.5" fill="currentColor" />
+          <circle cx="65" cy="45" r="2.5" fill="currentColor" />
+          
+          {/* Professional Smile */}
           <path 
-            d={isSpeaking ? "M 35 75 Q 50 85 70 70" : "M 40 75 Q 55 78 70 72"} 
-            stroke="white" 
+            d={isSpeaking ? "M 35 70 Q 50 80 65 70" : "M 40 70 Q 50 73 60 70"} 
+            stroke="currentColor" 
             strokeWidth="3" 
             fill="transparent" 
             strokeLinecap="round" 
@@ -41,14 +43,15 @@ const FaneAvatar: React.FC<FaneAvatarProps> = ({ isSpeaking, isListening, status
         </svg>
       </div>
 
-      {/* Visualizer bars */}
+      {/* Discrete Audio Visualizer */}
       {isSpeaking && (
-        <div className="absolute -bottom-4 flex gap-1.5 h-16 items-end">
-          {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+        <div className="absolute -bottom-2 flex gap-1 h-10 items-center">
+          {[1, 2, 3, 4, 5].map((i) => (
             <div 
               key={i} 
-              className="w-2 bg-gradient-to-t from-indigo-500 to-purple-400 rounded-full animate-bounce" 
-              style={{ animationDelay: `${i * 0.05}s`, height: `${40 + Math.random() * 60}%` }}
+              className="w-1.5 bg-blue-500 rounded-full animate-bounce" 
+              // Fix: Moved 's' outside the template expression
+              style={{ animationDelay: `${i * 0.1}s`, height: `${30 + Math.random() * 50}%` }}
             ></div>
           ))}
         </div>
@@ -57,4 +60,4 @@ const FaneAvatar: React.FC<FaneAvatarProps> = ({ isSpeaking, isListening, status
   );
 };
 
-export default FaneAvatar;
+export default MullerAvatar;

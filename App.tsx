@@ -4,20 +4,20 @@ import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
 import { ConnectionStatus, TranscriptionPart } from './types';
 import { decode, decodeAudioData, createPcmBlob } from './services/audioUtils';
 import { fetchAllConversations, saveConversation } from './services/supabase';
-import FaneAvatar from './components/FaneAvatar';
+import MullerAvatar from './components/FaneAvatar'; // Reusing the visual component logic
 import TranscriptionView from './components/TranscriptionView';
 
-const BASE_SYSTEM_INSTRUCTION = `Ești Fane, moderatorul oficial și sufletul unui grup de băieți puși pe glume, ironii și caterincă. 
-NU ești un asistent politicos, ci ești unul dintre ei – dar tu ești cel cu replicile la tine care ține grupul în frâu.
+const BASE_SYSTEM_INSTRUCTION = `Ești Herr Müller, un profesor de limba germană extrem de dedicat, răbdător și profesionist. 
+Scopul tău este să ajuți elevul să învețe germana într-un mod interactiv și corect.
 
 STILUL TĂU:
-1. Fii spiritual, acid când e cazul și mereu gata de o glumă. Folosește jargon de gașcă (ex: "băieți", "măi", "fii atent aici").
-2. Aruncă pastile: dacă cineva zice ceva banal, taxează-l cu umor.
-3. JURNALUL DE PERLE: Consultă istoricul de mai jos. Amintește-le de glumele vechi sau de momentele când au dat-o în bară. 
-4. Arbitrează: Dacă se ceartă în glumă, dă dreptate celui care are gluma mai bună.
-5. Fii proactiv: Dacă e liniște, bagă tu o strâmbă sau întreabă-i ce au mai făcut.
+1. Vorbește calm, clar și folosește o dicție impecabilă.
+2. Când elevul greșește, corectează-l cu blândețe, explicând pe scurt regula gramaticală în română, dar menținând conversația în germană pe cât posibil.
+3. Începe cu "Guten Tag!" sau "Hallo!" și încurajează elevul constant (ex: "Sehr gut!", "Ausgezeichnet!").
+4. MEMORIA ACADEMICĂ: Folosește istoricul de mai jos pentru a reveni asupra cuvintelor sau regulilor pe care elevul nu le știa în lecțiile trecute.
+5. Fii structurat: Propune teme de discuție (ex: la cumpărături, la medic, despre familie) dacă elevul nu are o inițiativă.
 
-CONTEXTUL TĂU DE MEMORIE:`;
+CONTEXTUL LECȚIILOR ANTERIOARE:`;
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.IDLE);
@@ -53,20 +53,20 @@ const App: React.FC = () => {
       const history = await fetchAllConversations();
       const todayStr = new Date().toISOString().split('T')[0];
       
-      let contextStr = "\n\n### ARHIVA DE CATERINCĂ A GĂȘTII ###\n";
+      let contextStr = "\n\n### RAPORTUL DE PROGRES AL ELEVULUI ###\n";
       
       if (history.length === 0) {
-        contextStr += "Sunteți la prima ieșire virtuală. Salută-i cu entuziasm.\n";
+        contextStr += "Prima lecție. Evaluează nivelul elevului și fii încurajator.\n";
       }
 
       history.forEach(entry => {
-        contextStr += `--- ZIUA: ${entry.date} ---\n${entry.content}\n\n`;
+        contextStr += `--- LECȚIA DIN DATA: ${entry.date} ---\n${entry.content}\n\n`;
         
         if (!isBackground && entry.date === todayStr && !fullConversationTextRef.current) {
           fullConversationTextRef.current = entry.content;
           const parsed = entry.content.split('\n').filter(l => l.trim()).map(line => ({
-            text: line.replace(/^\[\d{2}:\d{2}\]\s*(Gașca:|Fane:)\s*/, ''),
-            isUser: line.includes('Gașca:'),
+            text: line.replace(/^\[\d{2}:\d{2}\]\s*(Student:|Prof\. Müller:)\s*/, ''),
+            isUser: line.includes('Student:'),
             timestamp: Date.now()
           }));
           setTranscription(parsed);
@@ -124,7 +124,7 @@ const App: React.FC = () => {
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } } }, // Puck is more energetic
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } } }, // Charon sounds more mature and academic
           systemInstruction: `${BASE_SYSTEM_INSTRUCTION}\n${allHistoryContextRef.current}`,
           inputAudioTranscription: {},
           outputAudioTranscription: {},
@@ -151,11 +151,11 @@ const App: React.FC = () => {
               const m = transcriptionBufferRef.current.model.trim();
               const ts = getTimestamp();
               if (u) {
-                fullConversationTextRef.current += `${ts} Gașca: ${u}\n`;
+                fullConversationTextRef.current += `${ts} Student: ${u}\n`;
                 setTranscription(prev => [...prev, { text: u, isUser: true, timestamp: Date.now() }]);
               }
               if (m) {
-                fullConversationTextRef.current += `${ts} Fane: ${m}\n`;
+                fullConversationTextRef.current += `${ts} Prof. Müller: ${m}\n`;
                 setTranscription(prev => [...prev, { text: m, isUser: false, timestamp: Date.now() }]);
               }
               transcriptionBufferRef.current = { user: '', model: '' };
@@ -190,57 +190,61 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-950 p-4 md:p-8">
-      <header className="w-full max-w-5xl mx-auto flex justify-between items-center mb-6">
+    <div className="min-h-screen flex flex-col bg-slate-100 p-4 md:p-8">
+      <header className="w-full max-w-5xl mx-auto flex justify-between items-center mb-8 bg-white p-6 rounded-3xl academic-shadow">
         <div className="flex items-center gap-5">
-          <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-[0_0_15px_rgba(79,70,229,0.5)]">
-            <span className="text-2xl font-black text-white italic">F</span>
+          <div className="w-16 h-16 bg-blue-700 rounded-2xl flex items-center justify-center shadow-lg">
+            <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+            </svg>
           </div>
           <div>
-            <h1 className="text-3xl font-black text-white tracking-tighter uppercase italic">Fane <span className="text-indigo-500">Live</span></h1>
+            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Prof. <span className="text-blue-700">Müller</span></h1>
             <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-green-400 animate-pulse' : 'bg-slate-600'}`}></span>
-              <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">
-                {status === ConnectionStatus.CONNECTED ? 'Grup activ' : 'Server Offline'}
+              <span className={`w-2.5 h-2.5 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></span>
+              <p className="text-slate-500 font-semibold uppercase text-xs tracking-widest">
+                {status === ConnectionStatus.CONNECTED ? 'Sesiune activă' : 'Academia Müller'}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          {isMemoryRefreshing && <div className="text-indigo-400 font-bold animate-pulse text-xs tracking-widest uppercase">Syncing Perle...</div>}
-          {lastMemoryUpdate && <div className="text-slate-500 text-xs font-mono">DB v2.5 | {lastMemoryUpdate}</div>}
+        <div className="hidden md:flex flex-col items-end gap-1">
+          {isMemoryRefreshing && <div className="text-blue-600 font-bold animate-pulse text-[10px] tracking-widest uppercase">Actualizez raportul...</div>}
+          {lastMemoryUpdate && <div className="text-slate-400 text-xs font-medium uppercase">Ultima sincronizare: {lastMemoryUpdate}</div>}
         </div>
       </header>
 
       <main className="flex-1 w-full max-w-5xl mx-auto flex flex-col">
         {status === ConnectionStatus.IDLE || status === ConnectionStatus.ERROR ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
-            <h2 className="text-6xl md:text-8xl font-black text-white mb-6 tracking-tighter leading-tight uppercase">
-              Ce ziceți, <br/><span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-500 to-purple-500">Măi Băieți?</span>
+            <div className="mb-10 p-4 bg-blue-50 rounded-full">
+              <span className="text-blue-700 font-bold text-lg px-6 py-2">Willkommen zur Deutschstunde!</span>
+            </div>
+            <h2 className="text-5xl md:text-7xl font-bold text-slate-900 mb-6 tracking-tight leading-tight">
+              Sunteți gata pentru <br/><span className="text-blue-700">Lecția de Germană?</span>
             </h2>
-            <p className="text-xl text-slate-400 mb-10 max-w-lg font-medium">Fane e pregătit pentru o doză proaspătă de caterincă. Cine are curaj să înceapă?</p>
+            <p className="text-xl text-slate-500 mb-12 max-w-xl font-medium">Herr Müller vă așteaptă să exersați pronunția și gramatica într-un mod natural.</p>
             
             <button 
               onClick={connect}
               disabled={isLoadingMemories}
-              className={`group relative overflow-hidden px-16 py-8 rounded-full transition-all active:scale-95 ${isLoadingMemories ? 'bg-slate-800' : 'bg-indigo-600 hover:bg-indigo-500'}`}
+              className={`group relative overflow-hidden px-16 py-8 rounded-3xl transition-all academic-shadow active:scale-95 ${isLoadingMemories ? 'bg-slate-200' : 'bg-blue-700 hover:bg-blue-800'}`}
             >
-              <span className="relative z-10 text-3xl font-black text-white uppercase italic">
-                {isLoadingMemories ? 'Se încarcă gașca...' : 'Dă-i drumul!'}
+              <span className="relative z-10 text-2xl font-bold text-white uppercase tracking-wide">
+                {isLoadingMemories ? 'Pregătesc materialele...' : 'Începe Lecția'}
               </span>
-              <div className="absolute inset-0 bg-gradient-to-r from-indigo-400 to-purple-500 opacity-0 group-hover:opacity-20 transition-opacity"></div>
             </button>
-            {status === ConnectionStatus.ERROR && <p className="mt-6 text-red-500 font-bold uppercase tracking-widest">Server Error. Mai bagă o fise!</p>}
+            {status === ConnectionStatus.ERROR && <p className="mt-6 text-red-600 font-bold text-lg italic">Eroare de conexiune. Vă rog să reîncercați.</p>}
           </div>
         ) : (
           <div className="flex-1 flex flex-col gap-6">
-            <FaneAvatar isSpeaking={isSpeaking} isListening={isListening} status={status} />
+            <MullerAvatar isSpeaking={isSpeaking} isListening={isListening} status={status} />
             <TranscriptionView items={transcription} />
-            <div className="flex justify-center pb-4">
-              <div className="bg-slate-900/80 border border-slate-800 px-8 py-4 rounded-full flex items-center gap-3">
-                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-ping"></div>
-                <span className="text-slate-400 font-bold text-sm uppercase tracking-widest">Vă ascultă Fane...</span>
+            <div className="flex justify-center pb-6">
+              <div className="bg-white px-10 py-5 rounded-full flex items-center gap-4 academic-shadow border border-slate-100">
+                <div className="w-3 h-3 bg-blue-600 rounded-full animate-ping"></div>
+                <span className="text-slate-600 font-bold text-lg italic">Vă ascult cu atenție...</span>
               </div>
             </div>
           </div>
@@ -248,11 +252,11 @@ const App: React.FC = () => {
       </main>
       
       {isSaving && (
-        <div className="fixed bottom-6 right-6 bg-green-500 text-slate-950 px-5 py-2 rounded-full text-xs font-black uppercase tracking-widest flex items-center gap-2 shadow-[0_0_15px_rgba(34,197,94,0.3)]">
-          <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        <div className="fixed bottom-10 right-10 bg-white border border-slate-200 text-slate-800 px-8 py-4 rounded-2xl text-sm font-bold flex items-center gap-4 academic-shadow animate-in slide-in-from-right-10">
+          <svg className="w-5 h-5 text-blue-600 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
-          Update Arhivă Perle
+          Salvez progresul elevului...
         </div>
       )}
     </div>
