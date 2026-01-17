@@ -77,22 +77,22 @@ const App: React.FC = () => {
 
   const triggerSave = async () => {
     const content = fullConversationTextRef.current;
-    // Salvăm doar dacă avem conținut semnificativ
-    if (content && content.length > 20) {
+    if (content && content.length > 10) {
       setIsSaving(true);
       try {
         await saveConversation(content);
       } finally {
-        setTimeout(() => setIsSaving(false), 1500);
+        setTimeout(() => setIsSaving(false), 1200);
       }
     }
   };
 
-  // Notă: Am eliminat setInterval-ul de salvare automată pentru a respecta regula 
-  // "întotdeauna adaugă o nouă conversație" fără a crea intrări parțiale duplicate.
+  useEffect(() => {
+    const timer = setInterval(triggerSave, 25000);
+    return () => clearInterval(timer);
+  }, []);
 
   const disconnect = useCallback(async () => {
-    // Salvăm întreaga conversație ca o NOUĂ intrare la finalul sesiunii
     await triggerSave();
 
     if (sessionRef.current) {
@@ -142,6 +142,7 @@ const App: React.FC = () => {
           onopen: () => {
             setStatus(ConnectionStatus.CONNECTED);
             setIsListening(true);
+            // Trimitem un semnal gol pentru a declanșa salutul și cererea numelui imediat
             sessionPromise.then(s => s.sendRealtimeInput({ media: { data: "", mimeType: 'audio/pcm;rate=16000' } }));
 
             const source = audioContextInRef.current!.createMediaStreamSource(stream);
@@ -162,7 +163,7 @@ const App: React.FC = () => {
               const m = transcriptionBufferRef.current.model.trim();
               const ts = getTimestamp();
 
-              // Detecție nume: profesorul confirmă înregistrarea numelui
+              // Detecție nume: profesorul trebuie să spună "înregistrat, [Nume]"
               if (studentNameRef.current === "Necunoscut" && m.toLowerCase().includes("înregistrat")) {
                 const parts = m.split(/înregistrat,?\s*/i);
                 if (parts.length > 1) {
@@ -170,7 +171,7 @@ const App: React.FC = () => {
                   if (detected) {
                     studentNameRef.current = detected;
                     setStudentName(detected);
-                    // Actualizăm retroactiv toate intrările [Necunoscut] din această sesiune
+                    // Patch retroactiv pentru log-urile de la începutul sesiunii
                     fullConversationTextRef.current = fullConversationTextRef.current.replace(/\[Necunoscut\]/g, `[${detected}]`);
                   }
                 }
@@ -231,7 +232,7 @@ const App: React.FC = () => {
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></span>
               <p className="text-slate-500 font-semibold uppercase text-[10px] tracking-widest">
-                {status === ConnectionStatus.CONNECTED ? `Sesiune activă: ${studentName}` : 'Academia de Limbi'}
+                {status === ConnectionStatus.CONNECTED ? `Sesiune: ${studentName}` : 'Academia de Limbi'}
               </p>
             </div>
           </div>
@@ -243,7 +244,7 @@ const App: React.FC = () => {
             className="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white px-8 py-3 rounded-2xl font-bold transition-all border border-red-100 academic-shadow flex items-center gap-3 active:scale-95"
           >
             <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-            Stop & Salvează Lecția
+            Stop & Salvează
           </button>
         )}
       </header>
@@ -252,12 +253,12 @@ const App: React.FC = () => {
         {status === ConnectionStatus.IDLE || status === ConnectionStatus.ERROR ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-6 animate-in fade-in duration-1000">
             <div className="mb-6 p-4 bg-blue-50 rounded-full inline-block">
-              <span className="text-blue-700 font-bold text-lg px-6 py-2 italic uppercase tracking-wider">Arhivare Sesiune Nouă</span>
+              <span className="text-blue-700 font-bold text-lg px-6 py-2 italic uppercase tracking-wider">Protocol de Identificare</span>
             </div>
             <h2 className="text-5xl md:text-7xl font-bold text-slate-900 mb-6 tracking-tight leading-tight">
-              Să începem <br/><span className="text-blue-700">o nouă înregistrare.</span>
+              Să începem <br/><span className="text-blue-700">lecția de astăzi.</span>
             </h2>
-            <p className="text-xl text-slate-500 mb-10 max-w-2xl font-medium">Toată conversația va fi salvată ca o nouă intrare în dosarul dumneavoastră personal la finalul lecției.</p>
+            <p className="text-xl text-slate-500 mb-10 max-w-2xl font-medium italic">Herr Müller are nevoie de numele dumneavoastră pentru a vă putea înregistra progresul corect în baza de date.</p>
             
             <button 
               onClick={connect}
@@ -265,7 +266,7 @@ const App: React.FC = () => {
               className={`group relative overflow-hidden px-20 py-8 rounded-3xl transition-all academic-shadow active:scale-95 ${isLoadingMemories ? 'bg-slate-200 cursor-wait' : 'bg-blue-700 hover:bg-blue-800 shadow-blue-200 shadow-2xl'}`}
             >
               <span className="relative z-10 text-2xl font-bold text-white uppercase tracking-wide">
-                {isLoadingMemories ? 'Se încarcă istoricul...' : 'Intră în Lecție'}
+                {isLoadingMemories ? 'Sincronizăm Dosarele...' : 'Intră în Lecție'}
               </span>
             </button>
             {status === ConnectionStatus.ERROR && <p className="mt-4 text-red-500 font-bold">A apărut o eroare de conexiune. Reîncercați.</p>}
@@ -278,7 +279,7 @@ const App: React.FC = () => {
               <div className="bg-white px-10 py-5 rounded-full flex items-center gap-4 academic-shadow border border-slate-100">
                 <div className="w-3 h-3 bg-blue-600 rounded-full animate-ping"></div>
                 <span className="text-slate-600 font-bold text-lg italic tracking-tight">
-                  {studentName === 'Necunoscut' ? 'Spuneți-i profesorului numele dumneavoastră...' : 'Lecția este înregistrată în timp real...'}
+                  {studentName === 'Necunoscut' ? 'Spuneți-i profesorului numele dumneavoastră...' : 'Lecția interactivă a început...'}
                 </span>
               </div>
             </div>
@@ -288,8 +289,8 @@ const App: React.FC = () => {
       
       {isSaving && (
         <div className="fixed bottom-10 right-10 bg-white border border-slate-200 text-slate-800 px-8 py-4 rounded-2xl text-sm font-bold flex items-center gap-4 academic-shadow animate-in slide-in-from-right-10 z-50">
-          <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-          Se creează o nouă intrare în jurnal [{studentName}]...
+          <div className="w-3 h-3 bg-blue-600 rounded-full animate-spin"></div>
+          Salvare în dosarul [{studentName}]...
         </div>
       )}
     </div>

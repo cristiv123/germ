@@ -71,23 +71,24 @@ export async function fetchTodayConversation(): Promise<string | null> {
 }
 
 /**
- * Salvează o NOUĂ conversație în baza de date.
- * Folosește .insert() pentru a evita suprascrierea (upsert).
+ * Salvează sau actualizează conversația zilei curente.
  */
 export async function saveConversation(content: string) {
   if (!content || !supabase) return;
 
-  // Folosim timestamp complet pentru a evita conflictele de dată dacă sunt mai multe sesiuni pe zi
-  const timestamp = new Date().toISOString();
+  const today = new Date().toISOString().split('T')[0];
 
   try {
     const { error } = await supabase
       .from('daily_conversations')
-      .insert({ 
-        conversation_date: timestamp, 
-        content: content,
-        updated_at: timestamp
-      });
+      .upsert(
+        { 
+          conversation_date: today, 
+          content: content,
+          updated_at: new Date().toISOString()
+        }, 
+        { onConflict: 'conversation_date' }
+      );
 
     if (error) {
       if (error.code === '401' || error.message.includes('Invalid API key')) {
@@ -96,6 +97,6 @@ export async function saveConversation(content: string) {
       throw error;
     }
   } catch (err) {
-    console.error('Eroare la inserarea în DB:', err);
+    console.error('Eroare la salvarea în DB:', err);
   }
 }
