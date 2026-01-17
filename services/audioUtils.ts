@@ -26,6 +26,11 @@ export async function decodeAudioData(
 ): Promise<AudioBuffer> {
   const dataInt16 = new Int16Array(data.buffer);
   const frameCount = dataInt16.length / numChannels;
+  
+  if (frameCount === 0) {
+    console.warn("[AudioUtils] Lot audio gol primit pentru decodare.");
+  }
+
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
 
   for (let channel = 0; channel < numChannels; channel++) {
@@ -41,7 +46,6 @@ export function createPcmBlob(data: Float32Array): { data: string; mimeType: str
   const l = data.length;
   const int16 = new Int16Array(l);
   for (let i = 0; i < l; i++) {
-    // Clamping to avoid distortion
     int16[i] = Math.max(-1, Math.min(1, data[i])) * 32768;
   }
   return {

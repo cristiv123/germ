@@ -27,6 +27,10 @@ export const supabase = isConfigured
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
+if (!supabase) {
+  console.warn("[Supabase] Clientul Supabase nu a putut fi inițializat. Verifică variabilele de mediu.");
+}
+
 /**
  * Recuperează TOATE conversațiile salvate, ordonate cronologic.
  */
@@ -34,6 +38,7 @@ export async function fetchAllConversations(): Promise<{date: string, content: s
   if (!supabase) return [];
 
   try {
+    console.log("[Supabase] Executare fetchAllConversations...");
     const { data, error } = await supabase
       .from('daily_conversations')
       .select('conversation_date, content')
@@ -42,7 +47,7 @@ export async function fetchAllConversations(): Promise<{date: string, content: s
     if (error) throw error;
     return data?.map(d => ({ date: d.conversation_date, content: d.content })) || [];
   } catch (err) {
-    console.error('Eroare la recuperarea istoricului complet:', err);
+    console.error('[Supabase] Eroare la recuperarea istoricului complet:', err);
     return [];
   }
 }
@@ -56,6 +61,7 @@ export async function fetchTodayConversation(): Promise<string | null> {
   const today = new Date().toISOString().split('T')[0];
 
   try {
+    console.log(`[Supabase] Căutare conversație existentă pentru data: ${today}`);
     const { data, error } = await supabase
       .from('daily_conversations')
       .select('content')
@@ -65,31 +71,32 @@ export async function fetchTodayConversation(): Promise<string | null> {
     if (error) throw error;
     return data?.content || null;
   } catch (err) {
-    console.error('Eroare la recuperarea conversației de azi:', err);
+    console.error('[Supabase] Eroare la recuperarea conversației de azi:', err);
     return null;
   }
 }
 
 /**
  * Salvează conversația prin concatenare.
- * Verifică dacă există deja date pentru ziua curentă și adaugă noua sesiune la final,
- * protejând astfel munca altor studenți care au învățat în aceeași zi.
  */
 export async function saveConversation(content: string) {
-  if (!content || !supabase) return;
+  if (!content || !supabase) {
+    console.warn("[Supabase] Ignorare salvare: conținut vid sau Supabase neconfigurat.");
+    return;
+  }
 
   const today = new Date().toISOString().split('T')[0];
 
   try {
-    // 1. Preluăm ce există deja în baza de date pentru ziua de azi
+    console.log("[Supabase] Pregătire salvare sesiune...");
     const existingContent = await fetchTodayConversation();
     
-    // 2. Concatenăm: păstrăm vechiul conținut și adăugăm noul bloc de conversație
     const finalContent = existingContent 
       ? `${existingContent}\n\n--- SESIUNE NOUĂ ---\n${content}` 
       : content;
 
-    // 3. Folosim upsert pe cheia 'conversation_date' pentru a actualiza rândul existent cu blocul combinat
+    console.log(`[Supabase] Executare upsert pentru data ${today} (lungime totală: ${finalContent.length} caractere).`);
+    
     const { error } = await supabase
       .from('daily_conversations')
       .upsert(
@@ -102,12 +109,14 @@ export async function saveConversation(content: string) {
       );
 
     if (error) {
+      console.error("[Supabase] Eroare de server Supabase:", error);
       if (error.code === '401' || error.message.includes('Invalid API key')) {
         (window as any).SUPABASE_DISABLED = true;
       }
       throw error;
     }
+    console.log("[Supabase] Conversația a fost salvată și concatenată cu succes.");
   } catch (err) {
-    console.error('Eroare la salvarea prin concatenare în DB:', err);
+    console.error('[Supabase] Excepție la salvare:', err);
   }
 }
