@@ -1,24 +1,19 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { GoogleGenAI, LiveServerMessage } from '@google/genai';
+// Added Modality to imports
+import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { ConnectionStatus, TranscriptionPart } from './types';
 import { decode, decodeAudioData, createPcmBlob } from './services/audioUtils';
 import { fetchAllConversations, saveConversation } from './services/supabase';
 import MullerAvatar from './components/FaneAvatar';
 import TranscriptionView from './components/TranscriptionView';
 
-const CURRICULUM_DATA = `
-PROGRAMA:
-1. Gramatica: Man soll vs Man sollte, intrebari indirecte.
-2. Vocabular: Academic, cariera, HR.
-3. Expresii: in Erfüllung gehen, Rücksicht nehmen.
-`;
-
-const BASE_SYSTEM_INSTRUCTION = `Esti Herr Müller, profesor de germana.
-1. Saluta si cere numele studentului imediat.
-2. Nu preda nimic pana nu primesti un nume.
-3. Cand primesti numele, confirma obligatoriu cu "inregistrat".
-${CURRICULUM_DATA}`;
+const BASE_SYSTEM_INSTRUCTION = `Esti Herr Müller, un profesor de germana academic, calm si profesionist.
+1. Saluta studentul intr-un mod politicos si cere-i numele imediat pentru a deschide dosarul academic.
+2. NU incepe nicio lectie sau explicatie pana nu primesti un nume.
+3. Cand primesti numele, confirma obligatoriu folosind cuvantul cheie "inregistrat" (ex: "Am inregistrat numele tau, [Nume].").
+4. Dupa identificare, poarta o conversatie naturala in limba germana, adaptata nivelului studentului, axandu-te pe fluenta si corectitudine gramaticala.
+5. Mai jos ai acces la ARHIVA COMPLETA a tuturor conversatiilor anterioare cu acest student. Foloseste aceste informatii pentru a continua progresul academic, a-ti aminti ce ati discutat si a personaliza lectia curenta.`;
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.IDLE);
@@ -58,15 +53,17 @@ const App: React.FC = () => {
   const syncMemories = async () => {
     setIsLoadingMemories(true);
     try {
+      console.log("[Supabase] Se încarcă arhiva completă...");
       const history = await fetchAllConversations();
-      const recentHistory = history.slice(-3); // Mai restrictiv pentru a evita erori de marime
-      let contextStr = "\nISTORIC RECENT:\n";
-      recentHistory.forEach(entry => {
-        contextStr += `${entry.date}: ${entry.content.substring(0, 500)}...\n`;
+      console.log(`[Supabase] S-au găsit ${history.length} înregistrări în total.`);
+      
+      let contextStr = "\n--- ARHIVA COMPLETA A DOSARULUI ACADEMIC ---\n";
+      history.forEach(entry => {
+        contextStr += `[SESIUNE DIN DATA: ${entry.date}]\n${entry.content}\n\n`;
       });
       allHistoryContextRef.current = contextStr;
     } catch (err) {
-      console.error("[Supabase] Eroare memorie:", err);
+      console.error("[Supabase] Eroare la încărcarea memoriei complete:", err);
     } finally {
       setIsLoadingMemories(false);
     }
@@ -75,7 +72,7 @@ const App: React.FC = () => {
   const disconnect = useCallback(async () => {
     if (status === ConnectionStatus.IDLE && !sessionRef.current) return;
 
-    console.log("[Audio] Deconectare...");
+    console.log("[Audio] Deconectare resurselor...");
     const content = fullConversationTextRef.current;
     if (content && content.length > 15) {
       setIsSaving(true);
@@ -124,7 +121,7 @@ const App: React.FC = () => {
   const connect = async () => {
     const apiKey = process.env.API_KEY;
     if (!apiKey || apiKey === 'undefined' || apiKey.length < 10) {
-      console.error("[Gemini] API_KEY lipseste sau este invalida.");
+      console.error("[Gemini] API_KEY invalida.");
       setStatus(ConnectionStatus.ERROR);
       return;
     }
@@ -145,19 +142,18 @@ const App: React.FC = () => {
       audioContextOutRef.current = ctxOut;
 
       const ai = new GoogleGenAI({ apiKey });
-      const systemInstruction = `${BASE_SYSTEM_INSTRUCTION}\n${allHistoryContextRef.current}`.replace(/[^\x20-\x7E\n]/g, ''); // Curatare caractere non-ASCII simple pentru siguranta
+      const systemInstruction = `${BASE_SYSTEM_INSTRUCTION}\n${allHistoryContextRef.current}`.replace(/[^\x20-\x7E\n]/g, '');
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
-          responseModalities: ['AUDIO'], // Folosim string explicit
+          responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } } },
           systemInstruction: systemInstruction,
-          // Transcrierile sunt dezactivate temporar pentru a izola eroarea 1007
         },
         callbacks: {
           onopen: () => {
-            console.log("[Gemini] Conectat.");
+            console.log("[Gemini] WebSocket deschis. Sesiune Muller inceputa.");
             setStatus(ConnectionStatus.CONNECTED);
             setIsListening(true);
             
@@ -174,7 +170,6 @@ const App: React.FC = () => {
             processor.connect(ctxIn.destination);
           },
           onmessage: async (msg: LiveServerMessage) => {
-            // Logica pentru audio primis
             const audio = msg.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (audio && audioContextOutRef.current) {
               const ctx = audioContextOutRef.current;
@@ -196,7 +191,7 @@ const App: React.FC = () => {
                 nextStartTimeRef.current += buffer.duration;
                 activeSourcesRef.current.add(sourceNode);
               } catch (err) {
-                console.error("[Audio] Eroare decodare:", err);
+                console.error("[Audio] Eroare decodare lot:", err);
               }
             }
 
@@ -208,18 +203,18 @@ const App: React.FC = () => {
             }
           },
           onerror: (err) => {
-            console.error("[Gemini] Eroare:", err);
+            console.error("[Gemini] Eroare Stream:", err);
             setStatus(ConnectionStatus.ERROR);
           },
           onclose: (e) => {
-            console.warn("[Gemini] Inchis:", e.code, e.reason);
+            console.warn("[Gemini] Inchis de server:", e.code, e.reason);
             disconnect();
           }
         }
       });
       sessionRef.current = await sessionPromise;
     } catch (err) {
-      console.error("[Gemini] Esec:", err);
+      console.error("[Gemini] Esec la conectare:", err);
       setStatus(ConnectionStatus.ERROR);
     }
   };
@@ -256,18 +251,18 @@ const App: React.FC = () => {
         {status === ConnectionStatus.IDLE || status === ConnectionStatus.ERROR ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-6 animate-in fade-in duration-700">
             <h2 className="text-5xl font-bold text-slate-900 mb-6">Willkommen!</h2>
-            <p className="text-xl text-slate-500 mb-10 max-w-2xl">Lecția de germană este gata. Profesorul Müller vă așteaptă pentru a începe conversația.</p>
+            <p className="text-xl text-slate-500 mb-10 max-w-2xl">Lecția de germană este gata. Profesorul Müller vă așteaptă pentru o conversație academică personalizată.</p>
             
             <button 
               onClick={connect}
               disabled={isLoadingMemories}
               className={`px-16 py-6 rounded-2xl text-xl font-bold text-white transition-all shadow-xl active:scale-95 ${isLoadingMemories ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-700 hover:bg-blue-800 shadow-blue-200'}`}
             >
-              {isLoadingMemories ? 'Se încarcă...' : 'Începe Lecția'}
+              {isLoadingMemories ? 'Se încarcă arhiva...' : 'Începe Lecția'}
             </button>
             {status === ConnectionStatus.ERROR && (
               <div className="mt-8 text-red-600 font-bold bg-red-50 p-4 rounded-xl border border-red-200">
-                Eroare de conexiune. Te rugăm să verifici microfonul și să reîncerci.
+                Eroare de conexiune. Verifică microfonul și consola pentru codul 1007.
               </div>
             )}
           </div>
@@ -276,7 +271,7 @@ const App: React.FC = () => {
             <MullerAvatar isSpeaking={isSpeaking} isListening={isListening} status={status} />
             <TranscriptionView items={transcription} />
             <div className="text-center text-slate-400 italic text-sm">
-              Sesiune audio activă...
+              Conexiune stabilită. Profesorul ascultă...
             </div>
           </div>
         )}
@@ -285,7 +280,7 @@ const App: React.FC = () => {
       {isSaving && (
         <div className="fixed bottom-6 right-6 bg-white border border-slate-200 p-4 rounded-xl text-xs font-bold academic-shadow flex items-center gap-2 animate-bounce">
           <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-          Se salvează...
+          Sincronizare dosar academic...
         </div>
       )}
     </div>
